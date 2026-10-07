@@ -58,7 +58,47 @@ class TimelineEditorViewModel(
     }
 
     /**
-     * Gọi Ktor API Client để dịch toàn bộ dòng phụ đề bằng Gemini AI
+     * Tải file video dạng Byte lên Ktor Server để trích xuất Whisper STT tự động
+     */
+    fun processVideoStt(fileBytes: ByteArray, fileName: String = "user_video.mp4") {
+        if (fileBytes.isEmpty()) {
+            _uiState.update { it.copy(errorMessage = "Không thể đọc dữ liệu file video!") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                    successMessage = "Đang tải video lên Server & bóc tách Whisper STT..."
+                )
+            }
+
+            try {
+                val srtContent = apiClient.uploadVideoAndGetSrt(fileBytes, fileName)
+                val parsedSubtitles = SrtFormatter.parseSrt(srtContent)
+
+                _uiState.update {
+                    it.copy(
+                        subtitles = parsedSubtitles,
+                        isLoading = false,
+                        successMessage = "Trích xuất phụ đề tự động thành công!"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        errorMessage = e.message ?: "Lỗi trích xuất phụ đề từ máy chủ."
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Dịch toàn bộ danh sách phụ đề bằng Gemini AI
      */
     fun translateAllSubtitles() {
         val currentSubtitles = _uiState.value.subtitles
@@ -67,20 +107,15 @@ class TimelineEditorViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             try {
-                // 1. Chuyển List<SubtitleItem> thành chuỗi SRT
                 val rawSrt = SrtFormatter.encodeToSrt(currentSubtitles)
-                
-                // 2. Gửi request sang Ktor Server
                 val translatedSrt = apiClient.translateSrtContent(rawSrt)
-                
-                // 3. Parse chuỗi kết quả nhận về thành List<SubtitleItem>
                 val translatedItems = SrtFormatter.parseSrt(translatedSrt)
 
                 _uiState.update {
                     it.copy(
                         subtitles = translatedItems,
                         isLoading = false,
-                        successMessage = "Đã dịch thành công bằng AI!"
+                        successMessage = "Đã dịch thành công bằng Gemini AI!"
                     )
                 }
             } catch (e: Exception) {
@@ -95,15 +130,15 @@ class TimelineEditorViewModel(
     }
 
     /**
-     * Xuất ra chuỗi file .srt hoàn chỉnh
+     * Xuất chuỗi .srt hoàn chỉnh
      */
     fun exportSrt(): String {
         val srtContent = SrtFormatter.encodeToSrt(_uiState.value.subtitles)
-        _uiState.update { 
+        _uiState.update {
             it.copy(
                 exportedSrtContent = srtContent,
-                successMessage = "Đã xuất file SRT thành công!" 
-            ) 
+                successMessage = "Đã xuất file SRT thành công!"
+            )
         }
         return srtContent
     }
